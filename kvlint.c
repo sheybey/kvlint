@@ -166,9 +166,10 @@ int main(int argc, const char* argv[]) {
 				break;
 			case SLASH:
 				//forward slash
+				currentstate = COMMENT;
 				switch (character) {
 					case '/':
-						currentstate = COMMENT;
+						//no state change
 						break;
 					default:
 						printerror("bogus comment");
