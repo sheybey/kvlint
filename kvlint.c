@@ -14,7 +14,7 @@
 #include <stdio.h>
 #define printerror(error) printf("%s: error in %s (line %d): %s\n", argv[0], argv[1], linecount, error);
 
-typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND} state;
+typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, SLASH, COMMENT} state;
 
 int main(int argc, const char* argv[]) {
 	FILE *kvfile;
@@ -32,6 +32,7 @@ int main(int argc, const char* argv[]) {
 	int bracecount = 0;
 	int space;
 	int linecount = 1;
+	state prevstate;
 	state currentstate = KEY;
 	while ((character = fgetc(kvfile)) != EOF) {
 		if (character == '\n') {
@@ -40,31 +41,35 @@ int main(int argc, const char* argv[]) {
 		}
 		switch (currentstate) {
 			case KEY:
-				//newline, whitespace, close brace, or quote 
-			    switch (character) {
-			    	case '\n':
-			    	case '\t':
-			    	case ' ':
-			    		//no state change
-			    		break;
-			    	case '}':
-				    	if (--bracecount < 0) {
-			    			printerror("unexpected close brace");
-			    			bracecount = 0;
-			    		}
-			    		break;
-			    	case '\'':
-			    		printerror("unexpected single quote (use double quotes instead)");
-			    	case '"':
-			    		currentstate = KEYSTRING;
-			    		break;
-			    	default:
-			    		printerror("unexpected character (maybe you forgot to quote a string)");
-			    		break;
-			    }
-			    continue;
+				//newline, whitespace, close brace, quote, or comment
+				switch (character) {
+					case '\n':
+					case '\t':
+					case ' ':
+						//no state change
+						break;
+					case '}':
+						if (--bracecount < 0) {
+							printerror("unexpected close brace");
+							bracecount = 0;
+						}
+						break;
+					case '\'':
+						printerror("unexpected single quote (use double quotes instead)");
+					case '"':
+						currentstate = KEYSTRING;
+						break;
+					case '/':
+						prevstate = KEY;
+						currentstate = SLASH;
+						break;
+					default:
+						printerror("unexpected character (maybe you forgot to quote a string)");
+						break;
+				}
+				break;
 			case SUBKEY:
-				//newline, whitespace, or open brace
+				//newline, whitespace, open brace, or comment
 				switch (character) {
 					case '\n':
 					case '\t':
@@ -75,11 +80,15 @@ int main(int argc, const char* argv[]) {
 						bracecount++;
 						currentstate = KEY;
 						break;
+					case '/':
+						prevstate = KEY;
+						currentstate = SUBKEY;
+						break;
 					default:
 						printerror("unexpected character (probably malformed or missing subkey)");
 						break;
 				}
-				continue;
+				break;
 			case KEYSTRING:
 				//anything except a newline
 				switch (character) {
@@ -92,32 +101,37 @@ int main(int argc, const char* argv[]) {
 						currentstate = KEYSTRINGEND;
 						break;
 					default:
+						//no state change
 						break;
 				}
-				continue;
-		    case KEYSTRINGEND:
-		        //newline, whitespace, or quote
-		    	switch (character) {
-		    		case '\n':
-			    		currentstate = SUBKEY;
-		    			break;
-		    		case '\t':
-		    		case ' ':
-		    			space = 1;
-		    			break;
-		    		case '"':
-		    			if (!space) {
-		    				printerror("missing space between key and value strings");
-		    			}
-		    			currentstate = VALUESTRING;
-		    			break;
-		    		default:
-		    			printerror("unexpected character (maybe you forgot the newline before opening a subkey)");
-		    			break;
-		    	}
-		    	continue;
-		    case VALUESTRING:
-		    	//anything except a newline
+				break;
+			case KEYSTRINGEND:
+				//newline, whitespace, quote, or comment
+				switch (character) {
+					case '\n':
+						currentstate = SUBKEY;
+						break;
+					case '\t':
+					case ' ':
+						space = 1;
+						break;
+					case '"':
+						if (!space) {
+							printerror("missing space between key and value strings");
+						}
+						currentstate = VALUESTRING;
+						break;
+					case '/':
+						prevstate = KEYSTRINGEND;
+						currentstate = SLASH;
+						break;
+					default:
+						printerror("unexpected character (maybe you forgot the newline before opening a subkey)");
+						break;
+				}
+				break;
+			case VALUESTRING:
+				//anything except a newline
 				switch (character) {
 					case '\n':
 						printerror("unterminated value string");
@@ -127,23 +141,57 @@ int main(int argc, const char* argv[]) {
 						currentstate = VALUESTRINGEND;
 						break;
 					default:
+						//no state change
 						break;
 				}
-				continue;
-		    case VALUESTRINGEND:
-		    	//whitespace or newline
-		    	switch (character) {
-		    		case '\t':
-		    		case ' ':
-		    			//no state change
-		    			break;
-		    		case '\n':
-		    			currentstate = KEY;
-		    			break;
-		    		default:
-		    			printerror("unexpected character");
-		    			break;
-		    	}
+				break;
+			case VALUESTRINGEND:
+				//whitespace, newline, or comment
+				switch (character) {
+					case '\t':
+					case ' ':
+						//no state change
+						break;
+					case '\n':
+						currentstate = KEY;
+						break;
+					case '/':
+						prevstate = VALUESTRINGEND;
+						currentstate = SLASH;
+						break;
+					default:
+						printerror("unexpected character");
+						break;
+				}
+				break;
+			case SLASH:
+				//forward slash
+				switch (character) {
+					case '/':
+						currentstate = COMMENT;
+						break;
+					default:
+						printerror("bogus comment");
+						break;
+				}
+				break;
+			case COMMENT:
+				switch (character) {
+					case '\n':
+						switch (prevstate) {
+							case KEY:
+							case VALUESTRINGEND:
+								currentstate = KEY;
+								break;
+							case SUBKEY:
+							case KEYSTRINGEND:
+								currentstate = SUBKEY;
+								break;
+						}
+					default:
+						//no state change
+						break;
+				}
 		}
 	}
 	fclose(kvfile);
