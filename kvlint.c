@@ -35,6 +35,13 @@ int main(int argc, const char* argv[]) {
 	state prevstate;
 	state currentstate = KEY;
 	while ((character = fgetc(kvfile)) != EOF) {
+		if (character == '\r') {
+			character = fgetc(kvfile);
+			if (character != '\n') {
+				printerror("unexpected carriage return. state is dead, exiting");
+				return 1;
+			}
+		}
 		if (character == '\n') {
 			//a newline will always increase the linecount regardless of errors
 			linecount++;
