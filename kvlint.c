@@ -14,7 +14,7 @@
 #include <stdio.h>
 #define printerror(error) printf("%s: error in %s (line %d): %s\n", argv[0], argv[1], linecount, error);
 
-typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, SLASH, COMMENT} state;
+typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, STRINGESCAPE, SLASH, COMMENT} state;
 
 int main(int argc, const char* argv[]) {
 	FILE *kvfile;
@@ -39,6 +39,7 @@ int main(int argc, const char* argv[]) {
 			character = fgetc(kvfile);
 			if (character != '\n') {
 				printerror("unexpected carriage return. state is dead, exiting");
+				fclose(kvfile);
 				return 1;
 			}
 		}
@@ -103,6 +104,10 @@ int main(int argc, const char* argv[]) {
 						printerror("unterminated key string");
 						currentstate = SUBKEY;
 						break;
+					case '\\':
+						prevstate = VALUESTRING;
+						currentstate = STRINGESCAPE;
+						break;
 					case '"':
 						space = 0;
 						currentstate = KEYSTRINGEND;
@@ -144,6 +149,10 @@ int main(int argc, const char* argv[]) {
 						printerror("unterminated value string");
 						currentstate = KEY;
 						break;
+					case '\\':
+						prevstate = VALUESTRING;
+						currentstate = STRINGESCAPE;
+						break;
 					case '"':
 						currentstate = VALUESTRINGEND;
 						break;
@@ -168,6 +177,21 @@ int main(int argc, const char* argv[]) {
 						break;
 					default:
 						printerror("unexpected character");
+						break;
+				}
+				break;
+			case STRINGESCAPE:
+				//backslash, t, n, quote
+				currentstate = prevstate;
+				switch (character) {
+					case '\\':
+					case 't':
+					case 'n':
+					case '"':
+						//no state change
+						break;
+					default:
+						printerror("invalid escape sequence");
 						break;
 				}
 				break;
