@@ -1,6 +1,6 @@
 /*
  * kvlint.c - basic syntax check for KeyValues files
- * version 0.1
+ * version 0.2
  *
  * Copyright (c) 2015 Sam Heybey
  * All rights reserved.
