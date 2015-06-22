@@ -4,8 +4,6 @@ kvlint is a small program designed to lint KeyValues files, such as those used i
 This version is naive and assumes that there is a root node.
 
 ## usage
-```sh
-kvlint [-m] [-q] <filename>
-```
+    kvlint [-m] [-q] <filename>
 - -m: allow raw newlines in strings
 - -q: require all keys and values to be quoted
