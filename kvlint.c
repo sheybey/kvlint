@@ -12,28 +12,63 @@
  */
 
 #include <stdio.h>
-#define printerror(error) printf("%s: error in %s (line %d): %s\n", argv[0], argv[1], linecount, error);
+#include <unistd.h>
+#include <stdlib.h>
+
+//#define printerror(error) if (!errorprinted) { printf("%s: error in %s (line %d): %s\n", argv[0], argv[1], linecount, error); errorprinted = 1; }
+#define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error);
 
 typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, STRINGESCAPE, SLASH, COMMENT} state;
 
-int main(int argc, const char* argv[]) {
+int main(int argc, char* argv[]) {
+
 	FILE *kvfile;
-	int line = 1;
-	if (argc != 2) {
-		printf("usage: %s <filename>\n", argv[0]);
-		return 1;
-	}
-	kvfile = fopen(argv[1], "r");
-	if (kvfile == NULL) {
-		printf("%s: error: unable to open file %s\n", argv[0], argv[1]);
-		return 1;
-	}
+
 	int character;
 	int bracecount = 0;
-	int space;
 	int linecount = 1;
+	//int errorprinted = 0;
+	int space;
+	int quoted;
+
 	state prevstate;
 	state currentstate = KEY;
+
+	extern int optind;
+	int opt;
+	int die = 0;
+
+	int requirequotes = 0;
+	int allowmultiline = 0;
+
+	while ((opt = getopt(argc, argv, "qm")) != -1) {
+		switch (opt) {
+			case 'q':
+				requirequotes = 1;
+				break;
+			case 'm':
+				allowmultiline = 1;
+				break;
+			case '?':
+				//getopt prints an error message
+				die = 1;
+				break;
+		}
+	}
+
+	if (die || optind >= argc) {
+		printf("usage: %s [-q] [-m] <filename>\n", argv[0]);
+		printf("\t-q:\trequire all strings to be quoted\n");
+		printf("\t-m:\tallow multi-line strings\n");
+		return 1;
+	}
+
+	kvfile = fopen(argv[optind], "r");
+	if (kvfile == NULL) {
+		printf("%s: error: unable to open file %s\n", argv[0], argv[optind]);
+		return 1;
+	}
+
 	while ((character = fgetc(kvfile)) != EOF) {
 		if (character == '\r') {
 			character = fgetc(kvfile);
@@ -46,10 +81,11 @@ int main(int argc, const char* argv[]) {
 		if (character == '\n') {
 			//a newline will always increase the linecount regardless of errors
 			linecount++;
+			//errorprinted = 0;
 		}
 		switch (currentstate) {
 			case KEY:
-				//newline, whitespace, close brace, quote, or comment
+				//newline, whitespace, close brace, string, or comment
 				switch (character) {
 					case '\n':
 					case '\t':
@@ -58,13 +94,23 @@ int main(int argc, const char* argv[]) {
 						break;
 					case '}':
 						if (--bracecount < 0) {
-							printerror("unexpected close brace");
+							if (requirequotes) {
+								printerror("unexpected close brace");
+							} else {
+								printerror("unexpected close brace (you cannot use braces in unquoted strings)")
+							}
 							bracecount = 0;
 						}
 						break;
+					case '{':
+						printerror("unexpected open brace (maybe you forgot to name a key)");
+						bracecount++;
+						break;
 					case '\'':
 						printerror("unexpected single quote (use double quotes instead)");
+						break;
 					case '"':
+						quoted = 1;
 						currentstate = KEYSTRING;
 						break;
 					case '/':
@@ -72,7 +118,12 @@ int main(int argc, const char* argv[]) {
 						currentstate = SLASH;
 						break;
 					default:
-						printerror("unexpected character (maybe you forgot to quote a string)");
+						if (requirequotes) { 
+							printerror("unexpected character (maybe you forgot to quote a string)");
+						} else {
+							quoted = 0;
+							currentstate = KEYSTRING;
+						}
 						break;
 				}
 				break;
@@ -89,8 +140,8 @@ int main(int argc, const char* argv[]) {
 						currentstate = KEY;
 						break;
 					case '/':
-						prevstate = KEY;
-						currentstate = SUBKEY;
+						prevstate = SUBKEY;
+						currentstate = SLASH;
 						break;
 					default:
 						printerror("unexpected character (probably malformed or missing subkey)");
@@ -100,17 +151,51 @@ int main(int argc, const char* argv[]) {
 			case KEYSTRING:
 				//anything except a newline
 				switch (character) {
+					case '\t':
+						if (quoted) {
+							printerror("unescaped tab in key string");
+						} else {
+							space = 1;
+							currentstate = KEYSTRINGEND;
+						}
+						break;
+					case ' ':
+						if (!quoted) {
+							space = 1;
+							currentstate = KEYSTRINGEND;
+						}
+						break;
 					case '\n':
-						printerror("unterminated key string");
-						currentstate = SUBKEY;
+						if (quoted) {
+							if (!allowmultiline) {
+								printerror("unterminated key string");
+								currentstate = SUBKEY;
+							}
+						} else {
+							currentstate = SUBKEY;
+						}
 						break;
 					case '\\':
-						prevstate = VALUESTRING;
-						currentstate = STRINGESCAPE;
+						if (quoted) {
+							prevstate = KEYSTRING;
+							currentstate = STRINGESCAPE;
+						} else {
+							printerror("backslash escapes are invalid in unquoted strings");
+						}
 						break;
 					case '"':
-						space = 0;
-						currentstate = KEYSTRINGEND;
+						if (quoted) {
+							space = 0;
+							currentstate = KEYSTRINGEND;
+						} else {
+							printerror("double-quote in unquoted key string");
+						}
+						break;
+					case '{':
+					case '}':
+						if (!quoted) {
+							printerror("unexpected brace in key string (you cannot use braces in unquoted strings)")
+						}
 						break;
 					default:
 						//no state change
@@ -118,7 +203,7 @@ int main(int argc, const char* argv[]) {
 				}
 				break;
 			case KEYSTRINGEND:
-				//newline, whitespace, quote, or comment
+				//newline, whitespace, string, or comment
 				switch (character) {
 					case '\n':
 						currentstate = SUBKEY;
@@ -131,30 +216,76 @@ int main(int argc, const char* argv[]) {
 						if (!space) {
 							printerror("missing space between key and value strings");
 						}
+						quoted = 1;
 						currentstate = VALUESTRING;
 						break;
 					case '/':
 						prevstate = KEYSTRINGEND;
 						currentstate = SLASH;
 						break;
+					case '{':
+						bracecount++;
+						currentstate = KEY;
+						printerror("braces should be on their own line, or quoted if they are part of a string")
+						break;
+					case '}':
+						printerror("unexpected close brace (possibly unquoted value string)");
+						break;
 					default:
-						printerror("unexpected character (maybe you forgot the newline before opening a subkey)");
+						if (requirequotes) {
+							printerror("unexpected character after key string (possibly unquoted value string)");
+						} else {
+							quoted = 0;
+							currentstate = VALUESTRING;
+						}
 						break;
 				}
 				break;
 			case VALUESTRING:
 				//anything except a newline
 				switch (character) {
+					case '\t':
+						if (quoted) {
+							if (!allowmultiline) {
+								printerror("unescaped tab in value string");
+							}
+						} else {
+							space = 1;
+							currentstate = VALUESTRINGEND;
+						}
+						break;
+					case ' ':
+						if (!quoted) {
+							space = 1;
+							currentstate = VALUESTRINGEND;
+						}
+						break;
 					case '\n':
-						printerror("unterminated value string");
-						currentstate = KEY;
+						if (quoted) {
+							if (!allowmultiline) {
+								printerror("unterminated value string");
+								currentstate = KEY;
+							}
+						} else {
+							currentstate = KEY;
+						}
 						break;
 					case '\\':
-						prevstate = VALUESTRING;
-						currentstate = STRINGESCAPE;
+						if (quoted) {
+							prevstate = VALUESTRING;
+							currentstate = STRINGESCAPE;
+						} else {
+							printerror("backslash escapes are invalid in unquoted strings");
+						}
 						break;
 					case '"':
 						currentstate = VALUESTRINGEND;
+						break;
+					case '}':
+					case '{':
+						if (!quoted) {
+							printerror("unexpected brace in value string (you cannot use braces in unquoted strings)");
+						}
 						break;
 					default:
 						//no state change
@@ -176,7 +307,7 @@ int main(int argc, const char* argv[]) {
 						currentstate = SLASH;
 						break;
 					default:
-						printerror("unexpected character");
+						printerror("unexpected character after value string (maybe you forgot to use quotes)");
 						break;
 				}
 				break;
@@ -201,6 +332,9 @@ int main(int argc, const char* argv[]) {
 				switch (character) {
 					case '/':
 						//no state change
+						break;
+					case '*':
+						printerror("only line comments are allowed. inline comments act as line comments in most games and can cause unexpected behavior");
 						break;
 					default:
 						printerror("bogus comment");
@@ -228,7 +362,7 @@ int main(int argc, const char* argv[]) {
 	}
 	fclose(kvfile);
 	if (bracecount > 0) {
-		printf("%s: error in %s: unclosed key", argv[0], argv[1]);
+		printf("error in %s: unclosed key", argv[optind]);
 	}
 	return 0;
 }
