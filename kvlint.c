@@ -15,10 +15,9 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-//#define printerror(error) if (!errorprinted) { printf("%s: error in %s (line %d): %s\n", argv[0], argv[1], linecount, error); errorprinted = 1; }
 #define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error);
 
-typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, STRINGESCAPE, SLASH, COMMENT} state;
+typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, STRINGESCAPE, SLASH, COMMENT, CONDITIONAL, CONDITIONALEND} state;
 
 int main(int argc, char* argv[]) {
 
@@ -27,7 +26,6 @@ int main(int argc, char* argv[]) {
 	int character;
 	int bracecount = 0;
 	int linecount = 1;
-	//int errorprinted = 0;
 	int space;
 	int quoted;
 
@@ -81,7 +79,6 @@ int main(int argc, char* argv[]) {
 		if (character == '\n') {
 			//a newline will always increase the linecount regardless of errors
 			linecount++;
-			//errorprinted = 0;
 		}
 		switch (currentstate) {
 			case KEY:
@@ -117,6 +114,9 @@ int main(int argc, char* argv[]) {
 						prevstate = KEY;
 						currentstate = SLASH;
 						break;
+					case '[':
+						printerror("conditionals must be on the same line as the key they apply to");
+						break;
 					default:
 						if (requirequotes) { 
 							printerror("unexpected character (maybe you forgot to quote a string)");
@@ -142,6 +142,9 @@ int main(int argc, char* argv[]) {
 					case '/':
 						prevstate = SUBKEY;
 						currentstate = SLASH;
+						break;
+					case '[':
+						printerror("conditionals must be on the same line as the key they apply to");
 						break;
 					default:
 						printerror("unexpected character (probably malformed or missing subkey)");
@@ -203,7 +206,7 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 			case KEYSTRINGEND:
-				//newline, whitespace, string, or comment
+				//newline, whitespace, string, comment, or conditional
 				switch (character) {
 					case '\n':
 						currentstate = SUBKEY;
@@ -222,6 +225,10 @@ int main(int argc, char* argv[]) {
 					case '/':
 						prevstate = KEYSTRINGEND;
 						currentstate = SLASH;
+						break;
+					case '[':
+						prevstate = KEYSTRINGEND;
+						currentstate = CONDITIONAL;
 						break;
 					case '{':
 						bracecount++;
@@ -293,7 +300,7 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 			case VALUESTRINGEND:
-				//whitespace, newline, or comment
+				//whitespace, newline, comment, or conditional
 				switch (character) {
 					case '\t':
 					case ' ':
@@ -305,6 +312,10 @@ int main(int argc, char* argv[]) {
 					case '/':
 						prevstate = VALUESTRINGEND;
 						currentstate = SLASH;
+						break;
+					case '[':
+						prevstate = VALUESTRINGEND;
+						currentstate = CONDITIONAL;
 						break;
 					default:
 						printerror("unexpected character after value string (maybe you forgot to use quotes)");
@@ -342,6 +353,7 @@ int main(int argc, char* argv[]) {
 				}
 				break;
 			case COMMENT:
+				//ignore the rest of the line
 				switch (character) {
 					case '\n':
 						switch (prevstate) {
@@ -358,11 +370,59 @@ int main(int argc, char* argv[]) {
 						//no state change
 						break;
 				}
+				break;
+			case CONDITIONAL:
+				//ignore until ]
+				switch(character) {
+					case '\n':
+						printerror("unterminated conditional")
+						switch (prevstate) {
+							case VALUESTRINGEND:
+								currentstate = KEY;
+								break;
+							case KEYSTRINGEND:
+								currentstate = SUBKEY;
+								break;
+						}
+						break;
+					case ']':
+						currentstate = CONDITIONALEND;
+						break;
+				}
+				break;
+			case CONDITIONALEND:
+				//whitespace, newline, or comment
+				switch(character) {
+					case ' ':
+					case '\t':
+						//no state change
+						break;
+					case '\n':
+						switch (prevstate) {
+							case VALUESTRINGEND:
+								currentstate = KEY;
+								break;
+							case KEYSTRINGEND:
+								currentstate = SUBKEY;
+								break;
+						}
+						break;
+					case '[':
+						printerror("only one conditional may be used per key");
+						break;
+					case '/':
+						currentstate = SLASH;
+						break;
+					default:
+						printerror("unexpected character after conditional");
+						break;
+				}
+				break;
 		}
 	}
 	fclose(kvfile);
 	if (bracecount > 0) {
-		printf("error in %s: unclosed key", argv[optind]);
+		printf("error in %s: unclosed key\n", argv[optind]);
 	}
 	return 0;
 }
