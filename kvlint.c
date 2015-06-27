@@ -38,14 +38,18 @@ int main(int argc, char* argv[]) {
 
 	int requirequotes = 0;
 	int allowmultiline = 0;
+	int parseescapes = 0;
 
-	while ((opt = getopt(argc, argv, "qm")) != -1) {
+	while ((opt = getopt(argc, argv, "qme")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = 1;
 				break;
 			case 'm':
 				allowmultiline = 1;
+				break;
+			case 'e':
+				parseescapes = 1;
 				break;
 			case '?':
 				//getopt prints an error message
@@ -55,9 +59,10 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s [-q] [-m] <filename>\n", argv[0]);
-		printf("\t-q:\trequire all strings to be quoted\n");
-		printf("\t-m:\tallow multi-line strings\n");
+		printf("usage: %s [-q] [-m] [-e] <filename>\n", argv[0]);
+		printf("\t-q:\trequire all keys and values to be quoted\n");
+		printf("\t-m:\tallow raw newlines in strings\n");
+		printf("\t-e:\tparse and validate escape sequences\n");
 		return 1;
 	}
 
@@ -179,11 +184,13 @@ int main(int argc, char* argv[]) {
 						}
 						break;
 					case '\\':
-						if (quoted) {
-							prevstate = KEYSTRING;
-							currentstate = STRINGESCAPE;
-						} else {
-							printerror("backslash escapes are invalid in unquoted strings");
+						if (parseescapes) {
+							if (quoted) {
+								prevstate = KEYSTRING;
+								currentstate = STRINGESCAPE;
+							} else {
+								printerror("backslash in unquoted key string (should you be parsing escape sequences?)");
+							}
 						}
 						break;
 					case '"':
@@ -278,11 +285,13 @@ int main(int argc, char* argv[]) {
 						}
 						break;
 					case '\\':
-						if (quoted) {
-							prevstate = VALUESTRING;
-							currentstate = STRINGESCAPE;
-						} else {
-							printerror("backslash escapes are invalid in unquoted strings");
+						if (parseescapes) {
+							if (quoted) {
+								prevstate = VALUESTRING;
+								currentstate = STRINGESCAPE;
+							} else {
+								printerror("backslash in unquoted value string (should you be parsing escape sequences?)");
+							}
 						}
 						break;
 					case '"':
@@ -333,7 +342,14 @@ int main(int argc, char* argv[]) {
 						//no state change
 						break;
 					default:
-						printerror("invalid escape sequence");
+						switch (prevstate) {
+							case KEYSTRING:
+								printerror("invalid escape sequence in key string");
+								break;
+							case VALUESTRING:
+								printerror("invalid escape sequence in value string");
+								break;
+						}
 						break;
 				}
 				break;
