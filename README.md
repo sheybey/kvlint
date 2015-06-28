@@ -10,7 +10,6 @@ This version is naive and assumes that there is a root node.
 - -e: parse and validate escape sequences
 
 ## nitpicks / possible issues
-- Currently can only handle one file at a time.
 - When reading unicode text, behavior is undefined.
 - Some error messages could be refined a bit.
 - More specific checks for certain mistakes would be better.
