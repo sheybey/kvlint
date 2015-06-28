@@ -17,18 +17,17 @@
 
 #define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error);
 
-typedef enum {KEY, SUBKEY, KEYSTRING, KEYSTRINGEND, VALUESTRING, VALUESTRINGEND, STRINGESCAPE, SLASH, COMMENT, CONDITIONAL, CONDITIONALEND} state;
+typedef enum {KEY, SUBKEY,
+			  KEYSTRING, KEYSTRINGEND,
+			  VALUESTRING, VALUESTRINGEND,
+			  STRINGESCAPE,
+			  SLASH, LINECOMMENT, BLOCKCOMMENT, BLOCKASTERISK,
+			  CONDITIONAL, CONDITIONALEND
+} state;
 
 int main(int argc, char* argv[]) {
 
 	FILE *kvfile;
-
-	int character;
-	int space;
-	int quoted;
-
-	state prevstate;
-	state currentstate = KEY;
 
 	extern int optind;
 	int opt;
@@ -37,8 +36,9 @@ int main(int argc, char* argv[]) {
 	int requirequotes = 0;
 	int allowmultiline = 0;
 	int parseescapes = 0;
+	int blockcomments = 0;
 
-	while ((opt = getopt(argc, argv, "qme")) != -1) {
+	while ((opt = getopt(argc, argv, "qmeb")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = 1;
@@ -49,6 +49,9 @@ int main(int argc, char* argv[]) {
 			case 'e':
 				parseescapes = 1;
 				break;
+			case 'b':
+				blockcomments = 1;
+				break;
 			case '?':
 				//getopt prints an error message
 				die = 1;
@@ -57,10 +60,11 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s [-q] [-m] [-e] <filename>\n", argv[0]);
+		printf("usage: %s [-q] [-m] [-e] [-b] <filename> [...]\n", argv[0]);
 		printf("\t-q:\trequire all keys and values to be quoted\n");
 		printf("\t-m:\tallow raw newlines in strings\n");
 		printf("\t-e:\tparse and validate escape sequences\n");
+		printf("\t-b:\tallow block comments\n");
 		return 1;
 	}
 
@@ -70,19 +74,26 @@ int main(int argc, char* argv[]) {
 		int bracecount = 0;
 		int linecount = 1;
 
+		int character;
+		int space;
+		int quoted;
+
+		state prevstate;
+		state currentstate = KEY;
+
 		kvfile = fopen(argv[optind], "r");
 		if (kvfile == NULL) {
 			printf("%s: error: unable to open file %s\n", argv[0], argv[optind]);
-			return 1;
+			continue;
 		}
 
 		while ((character = fgetc(kvfile)) != EOF) {
 			if (character == '\r') {
 				character = fgetc(kvfile);
 				if (character != '\n') {
-					printerror("unexpected carriage return. state is dead, exiting");
+					printerror("unexpected carriage return, stopping");
 					fclose(kvfile);
-					return 1;
+					break;
 				}
 			}
 			if (character == '\n') {
@@ -359,20 +370,25 @@ int main(int argc, char* argv[]) {
 					break;
 				case SLASH:
 					//forward slash
-					currentstate = COMMENT;
 					switch (character) {
 						case '/':
-							//no state change
+							currentstate = LINECOMMENT;
 							break;
 						case '*':
-							printerror("only line comments are allowed. inline comments act as line comments in most games and can cause unexpected behavior");
+							if (blockcomments) {
+								currentstate = BLOCKCOMMENT;
+							} else {
+								currentstate = LINECOMMENT;
+								printerror("only line comments are allowed. block comments act as line comments in most games and can cause unexpected behavior");
+							}
 							break;
 						default:
+							currentstate = LINECOMMENT;
 							printerror("bogus comment");
 							break;
 					}
 					break;
-				case COMMENT:
+				case LINECOMMENT:
 					//ignore the rest of the line
 					switch (character) {
 						case '\n':
@@ -391,9 +407,34 @@ int main(int argc, char* argv[]) {
 							break;
 					}
 					break;
+				case BLOCKCOMMENT:
+					//ignore until */
+					switch (character) {
+						case '*':
+							currentstate = BLOCKASTERISK;
+							break;
+						default:
+							//no state change
+							break;
+					}
+					break;
+				case BLOCKASTERISK:
+					//asterisk in block comment
+					switch (character) {
+						case '*':
+							//no state change
+							break;
+						case '/':
+							currentstate = prevstate;
+							break;
+						default:
+							currentstate = BLOCKCOMMENT;
+							break;
+					}
+					break;
 				case CONDITIONAL:
 					//ignore until ]
-					switch(character) {
+					switch (character) {
 						case '\n':
 							printerror("unterminated conditional")
 							switch (prevstate) {
@@ -412,7 +453,7 @@ int main(int argc, char* argv[]) {
 					break;
 				case CONDITIONALEND:
 					//whitespace, newline, or comment
-					switch(character) {
+					switch (character) {
 						case ' ':
 						case '\t':
 							//no state change

@@ -4,10 +4,11 @@ kvlint is a small program designed to lint KeyValues files, such as those used i
 This version is naive and assumes that there is a root node.
 
 ## usage
-    kvlint [-q] [-m] [-e] <filename>
+    kvlint [-q] [-m] [-e] [-b] <filename> [...]
 - -q: require all keys and values to be quoted
 - -m: allow raw newlines in strings
 - -e: parse and validate escape sequences
+- -b: allow block comments
 
 ## nitpicks / possible issues
 - When reading unicode text, behavior is undefined.
