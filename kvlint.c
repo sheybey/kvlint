@@ -98,7 +98,7 @@ typedef enum {
 	CONDITIONAL, CONDITIONALEND
 } state;
 
-int isfile(const char* filename) {
+static int isfile(const char* filename) {
 	struct stat st;
 	if ((stat(filename, &st) != -1) && S_ISREG(st.st_mode)) {
 		return 1;
@@ -471,7 +471,7 @@ int main(int argc, char** argv) {
 					switch (character) {
 						case '\t':
 							if (quoted) {
-								if (!allowmultiline) {
+								if (!allowmultiline && parseescapes) {
 									printerror("unescaped tab in value string");
 								}
 							} else {
@@ -630,6 +630,7 @@ int main(int argc, char** argv) {
 									rcode = 1;
 									break;
 							}
+							break;
 						default:
 							//no state change
 							break;
