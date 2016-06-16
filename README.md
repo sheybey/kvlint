@@ -4,11 +4,12 @@ kvlint is a small program designed to lint KeyValues files, such as those used i
 This version is naive and assumes that there is a root node.
 
 ## usage
-    kvlint [-q] [-m] [-e] [-b] <filename> [...]
+    kvlint [-q] [-m] [-e] [-b] [-d] <filename> [...]
 - -q: require all keys and values to be quoted
 - -m: allow raw newlines in strings
 - -e: parse and validate escape sequences
 - -b: allow block comments
+- -d: validate #base directives
 
 ## nitpicks / possible issues
 - When reading unicode text, behavior is undefined.
@@ -16,6 +17,5 @@ This version is naive and assumes that there is a root node.
 - More specific checks for certain mistakes would be better.
 - Multi-line behavior is ill-defined. It is currently designed to pass budhud.
 - Doesn't check that there is a root node.
-- Doesn't check validity of "#" macro keys.
 
 example output: http://puu.sh/iySB8/5ace25eb0d.txt
