@@ -12,24 +12,101 @@
  */
 
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
-#define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error);
+#ifdef _WIN32
+#define S_ISREG(m) (m & S_IFMT) == S_IFREG
+#define BADCH (int)'?'
+#define BADARG (int)':'
+#define EMSG ""
 
-typedef enum {KEY, SUBKEY,
-			  KEYSTRING, KEYSTRINGEND,
-			  VALUESTRING, VALUESTRINGEND,
-			  STRINGESCAPE,
-			  SLASH, LINECOMMENT, BLOCKCOMMENT, BLOCKASTERISK,
-			  CONDITIONAL, CONDITIONALEND
+int opterr = 1, optind = 1, optopt, optreset;
+char* optarg;
+
+int getopt(int nargc, const char** nargv, const char* ostr) {
+	static char* place = EMSG;
+	const char* optlistind;
+	if (optreset || !*place) {
+		optreset = 0;
+		if (optind >= nargc || *(place = nargv[optind]) != '-') {
+			place = EMSG;
+			return -1;
+		}
+		if (place[1] && *++place == '-') {
+			++optind;
+			place = EMSG;
+			return -1;
+		}
+	}
+	if ((optopt = (int)*place++) == (int)':' ||
+		!(optlistind = strchr(ostr, optopt))) {
+		if (optopt == (int)'-') {
+			return -1;
+		}
+		if (!*place) {
+			++optind;
+		}
+		if (opterr && *ostr != ':') {
+			printf("illegal option -- %c\n", optopt);
+		}
+		return BADCH;
+	}
+	if (*++optlistind != ':') {
+		optarg = NULL;
+		if (!*place) {
+			++optind;
+		}
+	} else {
+		if (*place) {
+			optarg = place;
+		} else if (nargc <= ++optind) {
+			place = EMSG;
+			if (*ostr == ':') {
+				return BADARG;
+			}
+			if (opterr) {
+				printf("option requires an argument -- %c\n", optopt);
+			}
+			return BADCH;
+		} else {
+			optarg = nargv[optind];
+		}
+		place = EMSG;
+		++optind;
+	}
+	return optopt;
+}
+#else
+#include <unistd.h>
+#include <libgen.h>
+#endif
+
+#define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error)
+#define MAX_STRING_LENGTH 1024
+
+typedef enum {
+	KEY, SUBKEY,
+	KEYSTRING, KEYSTRINGEND,
+	VALUESTRING, VALUESTRINGEND,
+	STRINGESCAPE,
+	SLASH, LINECOMMENT, BLOCKCOMMENT, BLOCKASTERISK,
+	CONDITIONAL, CONDITIONALEND
 } state;
 
-int main(int argc, char* argv[]) {
+int isfile(const char* filename) {
+	struct stat st;
+	if ((stat(filename, &st) != -1) && S_ISREG(st.st_mode)) {
+		return 1;
+	}
+	return 0;
+}
 
-	FILE *kvfile;
-
+int main(int argc, char** argv) {
+#ifndef _WIN32
 	extern int optind;
+#endif
 	int opt;
 	int die = 0;
 
@@ -37,8 +114,9 @@ int main(int argc, char* argv[]) {
 	int allowmultiline = 0;
 	int parseescapes = 0;
 	int blockcomments = 0;
+	int validatedirectives = 0;
 
-	while ((opt = getopt(argc, argv, "qmeb")) != -1) {
+	while ((opt = getopt(argc, argv, "qmebd")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = 1;
@@ -52,6 +130,9 @@ int main(int argc, char* argv[]) {
 			case 'b':
 				blockcomments = 1;
 				break;
+			case 'd':
+				validatedirectives = 1;
+				break;
 			case '?':
 				//getopt prints an error message
 				die = 1;
@@ -60,28 +141,41 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s [-q] [-m] [-e] [-b] <filename> [...]\n", argv[0]);
+		printf("usage: %s [-q] [-m] [-e] [-b] [-d] <filename> [...]\n", argv[0]);
 		printf("\t-q:\trequire all keys and values to be quoted\n");
 		printf("\t-m:\tallow raw newlines in strings\n");
 		printf("\t-e:\tparse and validate escape sequences\n");
 		printf("\t-b:\tallow block comments\n");
+		printf("\t-d:\tvalidate #base directives\n");
 		return 1;
 	}
 
-
 	for (; optind < argc; optind++) {
+
+		FILE *kvfile;
 
 		int bracecount = 0;
 		int linecount = 1;
 
 		int character;
-		int space;
-		int quoted;
+
+		int space = 0;
+		int quoted = 0;
+		int directive = 0;
+		int checkfile = 0;
+		int overflow = 0;
+
+		char directivename[MAX_STRING_LENGTH] = "";
+		int directiveindex = 0;
+
+		char string[MAX_STRING_LENGTH] = "";
+		int stringindex = 0;
 
 		state prevstate;
 		state currentstate = KEY;
 
 		kvfile = fopen(argv[optind], "r");
+
 		if (kvfile == NULL) {
 			printf("%s: error: unable to open file %s\n", argv[0], argv[optind]);
 			continue;
@@ -114,7 +208,7 @@ int main(int argc, char* argv[]) {
 								if (requirequotes) {
 									printerror("unexpected close brace");
 								} else {
-									printerror("unexpected close brace (you cannot use braces in unquoted strings)")
+									printerror("unexpected close brace (you cannot use braces in unquoted strings)");
 								}
 								bracecount = 0;
 							}
@@ -173,10 +267,29 @@ int main(int argc, char* argv[]) {
 					break;
 				case KEYSTRING:
 					//anything except a newline
+					if (stringindex == 0) {
+						string[0] = '\0';
+						directivename[0] = '\0';
+						overflow = 0;
+					}
+					if (stringindex == MAX_STRING_LENGTH) {
+						printerror("key string size limit exceeded");
+						string[MAX_STRING_LENGTH - 1] = '\0';
+						directivename[MAX_STRING_LENGTH - 1] = '\0';
+						overflow = 1;
+					}
+					if (!overflow) {
+						string[stringindex] = character;
+						if (directive) {
+							directivename[directiveindex++] = character;
+						}
+					}
 					switch (character) {
 						case '\t':
 							if (quoted) {
-								printerror("unescaped tab in key string");
+								if (parseescapes) {
+									printerror("unescaped tab in key string");
+								}
 							} else {
 								space = 1;
 								currentstate = KEYSTRINGEND;
@@ -219,13 +332,35 @@ int main(int argc, char* argv[]) {
 						case '{':
 						case '}':
 							if (!quoted) {
-								printerror("unexpected brace in key string (you cannot use braces in unquoted strings)")
+								printerror("unexpected brace in key string (you cannot use braces in unquoted strings)");
+							}
+							break;
+						case '#':
+							if (validatedirectives && stringindex == 0) {
+								directive = 1;
 							}
 							break;
 						default:
 							//no state change
 							break;
 					}
+					if (currentstate == KEYSTRINGEND) {
+						if (!overflow) {
+							string[stringindex] = '\0';
+						}
+						stringindex = -1;
+						if (directive) {
+							directive = 0;
+							if (!overflow) {
+								directivename[directiveindex - 1] = '\0';
+							}
+							directiveindex = 0;
+							if (strcmp(directivename, "base") == 0) {
+								checkfile = 1;
+							}
+						}
+					}
+					stringindex++;
 					break;
 				case KEYSTRINGEND:
 					//newline, whitespace, string, comment, or conditional
@@ -255,7 +390,7 @@ int main(int argc, char* argv[]) {
 						case '{':
 							bracecount++;
 							currentstate = KEY;
-							printerror("braces should be on their own line, or quoted if they are part of a string")
+							printerror("braces should be on their own line, or quoted if they are part of a string");
 							break;
 						case '}':
 							printerror("unexpected close brace (possibly unquoted value string)");
@@ -272,6 +407,18 @@ int main(int argc, char* argv[]) {
 					break;
 				case VALUESTRING:
 					//anything except a newline
+					if (stringindex == 0) {
+						string[0] = '\0';
+						overflow = 0;
+					}
+					if (stringindex == MAX_STRING_LENGTH) {
+						printerror("value string size limit exceeded");
+						string[MAX_STRING_LENGTH - 1] = '\0';
+						overflow = 1;
+					}
+					if (!overflow) {
+						string[stringindex] = character;
+					}
 					switch (character) {
 						case '\t':
 							if (quoted) {
@@ -322,9 +469,19 @@ int main(int argc, char* argv[]) {
 							//no state change
 							break;
 					}
+					if (!overflow && currentstate == VALUESTRINGEND) {
+						string[stringindex] = '\0';
+					}
+					stringindex++;
 					break;
 				case VALUESTRINGEND:
 					//whitespace, newline, comment, or conditional
+					if (checkfile) {
+						checkfile = 0;
+						if (!isfile(string)) {
+							printerror("unreadable included file");
+						}
+					}
 					switch (character) {
 						case '\t':
 						case ' ':
@@ -364,6 +521,9 @@ int main(int argc, char* argv[]) {
 								case VALUESTRING:
 									printerror("invalid escape sequence in value string");
 									break;
+								default:
+									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
+									break;
 							}
 							break;
 					}
@@ -401,6 +561,10 @@ int main(int argc, char* argv[]) {
 								case KEYSTRINGEND:
 									currentstate = SUBKEY;
 									break;
+								default:
+									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
+									printerror("unexpected parser state in linecomment");
+									break;
 							}
 						default:
 							//no state change
@@ -436,13 +600,17 @@ int main(int argc, char* argv[]) {
 					//ignore until ]
 					switch (character) {
 						case '\n':
-							printerror("unterminated conditional")
+							printerror("unterminated conditional");
 							switch (prevstate) {
 								case VALUESTRINGEND:
 									currentstate = KEY;
 									break;
 								case KEYSTRINGEND:
 									currentstate = SUBKEY;
+									break;
+								default:
+									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
+									printerror("unexpected parser state in conditional");
 									break;
 							}
 							break;
@@ -466,6 +634,10 @@ int main(int argc, char* argv[]) {
 								case KEYSTRINGEND:
 									currentstate = SUBKEY;
 									break;
+								default:
+									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
+									printerror("unexpected parser state in conditionalend");
+									break;
 							}
 							break;
 						case '[':
@@ -484,6 +656,9 @@ int main(int argc, char* argv[]) {
 		fclose(kvfile);
 		if (bracecount > 0) {
 			printf("error in %s: unclosed key\n", argv[optind]);
+		}
+		if (currentstate == SUBKEY) {
+			printf("error in %s: trailing key string", argv[optind]);
 		}
 	}
 	
