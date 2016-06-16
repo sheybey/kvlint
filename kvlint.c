@@ -1,8 +1,8 @@
 /*
  * kvlint.c - basic syntax check for KeyValues files
- * version 0.3
+ * version 0.4
  *
- * Copyright (c) 2015 Sam Heybey
+ * Copyright (c) 2015-2016 Sam Heybey
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -17,6 +17,7 @@
 #include <sys/stat.h>
 
 #ifdef _WIN32
+#include <Windows.h>
 #define S_ISREG(m) (m & S_IFMT) == S_IFREG
 #define BADCH (int)'?'
 #define BADARG (int)':'
@@ -81,6 +82,8 @@ int getopt(int nargc, const char** nargv, const char* ostr) {
 #else
 #include <unistd.h>
 #include <libgen.h>
+#include <limits.h>
+#define MAX_PATH PATH_MAX
 #endif
 
 #define printerror(error) printf("error in %s (line %d): %s\n", argv[optind], linecount, error)
@@ -104,6 +107,8 @@ int isfile(const char* filename) {
 }
 
 int main(int argc, char** argv) {
+	int rcode = 0;
+
 #ifndef _WIN32
 	extern int optind;
 #endif
@@ -152,7 +157,9 @@ int main(int argc, char** argv) {
 
 	for (; optind < argc; optind++) {
 
-		FILE *kvfile;
+		FILE* kvfile;
+		char* abspath;
+		char* basedir;
 
 		int bracecount = 0;
 		int linecount = 1;
@@ -177,8 +184,49 @@ int main(int argc, char** argv) {
 		kvfile = fopen(argv[optind], "r");
 
 		if (kvfile == NULL) {
-			printf("%s: error: unable to open file %s\n", argv[0], argv[optind]);
+			printf("error: unable to open file %s\n", argv[optind]);
 			continue;
+		}
+
+		if (validatedirectives) {
+#ifdef _WIN32
+			abspath = _fullpath(NULL, argv[optind], MAX_PATH);
+			if (abspath == NULL) {
+				printf("unable to resolve full path, not validating directives\n");
+				validatedirectives = 0;
+				rcode = 1;
+			} else {
+				basedir = malloc(_MAX_DRIVE + _MAX_DIR * sizeof(char));
+				if (basedir == NULL) {
+					printf("unable to allocate memory for base directory, not validating directives\n");
+					free(abspath);
+					validatedirectives = 0;
+					rcode = 1;
+				} else {
+					basedir[0] = '\0';
+					char drive[_MAX_DRIVE];
+					char path[_MAX_DIR];
+					_splitpath_s(abspath, drive, _MAX_DRIVE, path, _MAX_DIR, NULL, 0, NULL, 0);
+					strcat_s(basedir, _MAX_DRIVE + _MAX_DIR, drive);
+					strcat_s(basedir, _MAX_DRIVE + _MAX_DIR, path);
+				}
+			}
+#else
+			abspath = realpath(argv[optind], NULL);
+			if (abspath == NULL) {
+				printf("unable to resolve full path, not validting directives\n");
+				validatedirectives = 0;
+				rcode = 1;
+			} else {
+				basedir = dirname(abspath);
+				if (basedir == NULL) {
+					printf("unable to determine base directory, not validating directives\n");
+					free(abspath);
+					validatedirectives = 0;
+					rcode = 1;
+				}
+			}
+#endif
 		}
 
 		while ((character = fgetc(kvfile)) != EOF) {
@@ -187,6 +235,7 @@ int main(int argc, char** argv) {
 				if (character != '\n') {
 					printerror("unexpected carriage return, stopping");
 					fclose(kvfile);
+					rcode = 1;
 					break;
 				}
 			}
@@ -478,8 +527,22 @@ int main(int argc, char** argv) {
 					//whitespace, newline, comment, or conditional
 					if (checkfile) {
 						checkfile = 0;
-						if (!isfile(string)) {
-							printerror("unreadable included file");
+#ifdef _WIN32
+						if (strlen(string) > MAX_PATH - strlen(basedir) - 1) { //Windows adds a slash, POSIX does not
+#else
+						if (strlen(string) > MAX_PATH - strlen(basedir) - 2) {
+#endif
+							printerror("included file path too long");
+						} else {
+							char path[MAX_PATH];
+							strcat(path, basedir);
+#ifndef _WIN32
+							strcat(path, "/");
+#endif
+							strcat(path, string);
+							if (!isfile(path)) {
+								printerror("unreadable included file");
+							}
 						}
 					}
 					switch (character) {
@@ -564,6 +627,7 @@ int main(int argc, char** argv) {
 								default:
 									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
 									printerror("unexpected parser state in linecomment");
+									rcode = 1;
 									break;
 							}
 						default:
@@ -611,6 +675,7 @@ int main(int argc, char** argv) {
 								default:
 									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
 									printerror("unexpected parser state in conditional");
+									rcode = 1;
 									break;
 							}
 							break;
@@ -637,6 +702,7 @@ int main(int argc, char** argv) {
 								default:
 									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
 									printerror("unexpected parser state in conditionalend");
+									rcode = 1;
 									break;
 							}
 							break;
@@ -653,6 +719,12 @@ int main(int argc, char** argv) {
 					break;
 			}
 		}
+		if (validatedirectives) {
+			free(abspath);
+#ifdef _WIN32
+			free(basedir);
+#endif
+		}
 		fclose(kvfile);
 		if (bracecount > 0) {
 			printf("error in %s: unclosed key\n", argv[optind]);
@@ -662,5 +734,5 @@ int main(int argc, char** argv) {
 		}
 	}
 	
-	return 0;
+	return rcode;
 }
