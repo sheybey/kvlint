@@ -32,10 +32,14 @@
 *.dSYM/
 test.kv
 
-#VS stuff
+# VS stuff
 Debug/
 Release/
 .vs/
 *.db
 *.opendb
 *.vcxproj.user
+
+# Distributables
+*.zip
+*.tar.gz
