@@ -95,7 +95,8 @@ typedef enum {
 	VALUESTRING, VALUESTRINGEND,
 	STRINGESCAPE,
 	SLASH, LINECOMMENT, BLOCKCOMMENT, BLOCKASTERISK,
-	CONDITIONAL, CONDITIONALEND
+	CONDITIONAL, CONDITIONALEND,
+	ENDOFROOT
 } state;
 
 static int isfile(const char* filename) {
@@ -120,8 +121,9 @@ int main(int argc, char** argv) {
 	int parseescapes = 0;
 	int blockcomments = 0;
 	int validatedirectives = 0;
+	int multipleroot = 0;
 
-	while ((opt = getopt(argc, argv, "qmebd")) != -1) {
+	while ((opt = getopt(argc, argv, "qmebdr")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = 1;
@@ -138,6 +140,9 @@ int main(int argc, char** argv) {
 			case 'd':
 				validatedirectives = 1;
 				break;
+			case 'r':
+				multipleroot = 1;
+				break;
 			case '?':
 				//getopt prints an error message
 				die = 1;
@@ -146,12 +151,13 @@ int main(int argc, char** argv) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s [-q] [-m] [-e] [-b] [-d] <filename> [...]\n", argv[0]);
+		printf("usage: %s [-q] [-m] [-e] [-b] [-d] [-r] <filename> [...]\n", argv[0]);
 		printf("\t-q:\trequire all keys and values to be quoted\n");
 		printf("\t-m:\tallow raw newlines in strings\n");
 		printf("\t-e:\tparse and validate escape sequences\n");
 		printf("\t-b:\tallow block comments\n");
 		printf("\t-d:\tvalidate #base directives\n");
+		printf("\t-r:\tallow multiple root keys\n");
 		return 1;
 	}
 
@@ -260,6 +266,9 @@ int main(int argc, char** argv) {
 									printerror("unexpected close brace (you cannot use braces in unquoted strings)");
 								}
 								bracecount = 0;
+							}
+							if (bracecount == 0 && !multipleroot) {
+								currentstate = ENDOFROOT;
 							}
 							break;
 						case '{':
@@ -624,6 +633,8 @@ int main(int argc, char** argv) {
 								case KEYSTRINGEND:
 									currentstate = SUBKEY;
 									break;
+								case ENDOFROOT:
+									currentstate = ENDOFROOT;
 								default:
 									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
 									printerror("unexpected parser state in linecomment");
@@ -718,6 +729,21 @@ int main(int argc, char** argv) {
 							break;
 					}
 					break;
+				case ENDOFROOT:
+					//whitespace, newline, or comment
+					switch (character) {
+						case ' ':
+						case '\t':
+						case '\n':
+							//no state change
+							break;
+						case '/':
+							currentstate = SLASH;
+							break;
+						default:
+							printerror("unexpected data after end of root key");
+							break;
+					}
 			}
 		}
 		if (validatedirectives) {
