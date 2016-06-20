@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <stdbool.h>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -114,38 +115,38 @@ int main(int argc, char** argv) {
 	extern int optind;
 #endif
 	int opt;
-	int die = 0;
+	bool die = false;
 
-	int requirequotes = 0;
-	int allowmultiline = 0;
-	int parseescapes = 0;
-	int blockcomments = 0;
-	int validatedirectives = 0;
-	int multipleroot = 0;
+	bool requirequotes = false;
+	bool allowmultiline = false;
+	bool parseescapes = false;
+	bool blockcomments = false;
+	bool validatedirectives = false;
+	bool multipleroot = false;
 
 	while ((opt = getopt(argc, argv, "qmebdr")) != -1) {
 		switch (opt) {
 			case 'q':
-				requirequotes = 1;
+				requirequotes = true;
 				break;
 			case 'm':
-				allowmultiline = 1;
+				allowmultiline = true;
 				break;
 			case 'e':
-				parseescapes = 1;
+				parseescapes = true;
 				break;
 			case 'b':
-				blockcomments = 1;
+				blockcomments = true;
 				break;
 			case 'd':
-				validatedirectives = 1;
+				validatedirectives = true;
 				break;
 			case 'r':
-				multipleroot = 1;
+				multipleroot = true;
 				break;
 			case '?':
 				//getopt prints an error message
-				die = 1;
+				die = true;
 				break;
 		}
 	}
@@ -172,11 +173,11 @@ int main(int argc, char** argv) {
 
 		int character;
 
-		int space = 0;
-		int quoted = 0;
-		int directive = 0;
-		int checkfile = 0;
-		int overflow = 0;
+		bool space = false;
+		bool quoted = false;
+		bool directive = false;
+		bool checkfile = false;
+		bool overflow = false;
 
 		char directivename[MAX_STRING_LENGTH] = "";
 		int directiveindex = 0;
@@ -199,14 +200,14 @@ int main(int argc, char** argv) {
 			abspath = _fullpath(NULL, argv[optind], MAX_PATH);
 			if (abspath == NULL) {
 				printf("unable to resolve full path, not validating directives\n");
-				validatedirectives = 0;
+				validatedirectives = false;
 				rcode = 1;
 			} else {
 				basedir = malloc(_MAX_DRIVE + _MAX_DIR * sizeof(char));
 				if (basedir == NULL) {
 					printf("unable to allocate memory for base directory, not validating directives\n");
 					free(abspath);
-					validatedirectives = 0;
+					validatedirectives = false;
 					rcode = 1;
 				} else {
 					basedir[0] = '\0';
@@ -221,14 +222,14 @@ int main(int argc, char** argv) {
 			abspath = realpath(argv[optind], NULL);
 			if (abspath == NULL) {
 				printf("unable to resolve full path, not validting directives\n");
-				validatedirectives = 0;
+				validatedirectives = false;
 				rcode = 1;
 			} else {
 				basedir = dirname(abspath);
 				if (basedir == NULL) {
 					printf("unable to determine base directory, not validating directives\n");
 					free(abspath);
-					validatedirectives = 0;
+					validatedirectives = false;
 					rcode = 1;
 				}
 			}
@@ -279,7 +280,7 @@ int main(int argc, char** argv) {
 							printerror("unexpected single quote (use double quotes instead)");
 							break;
 						case '"':
-							quoted = 1;
+							quoted = true;
 							currentstate = KEYSTRING;
 							break;
 						case '/':
@@ -293,7 +294,7 @@ int main(int argc, char** argv) {
 							if (requirequotes) { 
 								printerror("unexpected character (maybe you forgot to quote a string)");
 							} else {
-								quoted = 0;
+								quoted = false;
 								currentstate = KEYSTRING;
 							}
 							break;
@@ -328,13 +329,13 @@ int main(int argc, char** argv) {
 					if (stringindex == 0) {
 						string[0] = '\0';
 						directivename[0] = '\0';
-						overflow = 0;
+						overflow = false;
 					}
 					if (stringindex == MAX_STRING_LENGTH) {
 						printerror("key string size limit exceeded");
 						string[MAX_STRING_LENGTH - 1] = '\0';
 						directivename[MAX_STRING_LENGTH - 1] = '\0';
-						overflow = 1;
+						overflow = true;
 					}
 					if (!overflow) {
 						string[stringindex] = character;
@@ -349,13 +350,13 @@ int main(int argc, char** argv) {
 									printerror("unescaped tab in key string");
 								}
 							} else {
-								space = 1;
+								space = true;
 								currentstate = KEYSTRINGEND;
 							}
 							break;
 						case ' ':
 							if (!quoted) {
-								space = 1;
+								space = true;
 								currentstate = KEYSTRINGEND;
 							}
 							break;
@@ -395,7 +396,7 @@ int main(int argc, char** argv) {
 							break;
 						case '#':
 							if (validatedirectives && stringindex == 0) {
-								directive = 1;
+								directive = true;
 							}
 							break;
 						default:
@@ -408,13 +409,13 @@ int main(int argc, char** argv) {
 						}
 						stringindex = -1;
 						if (directive) {
-							directive = 0;
+							directive = false;
 							if (!overflow) {
 								directivename[directiveindex - 1] = '\0';
 							}
 							directiveindex = 0;
 							if (strcmp(directivename, "base") == 0) {
-								checkfile = 1;
+								checkfile = true;
 							}
 						}
 					}
@@ -428,13 +429,13 @@ int main(int argc, char** argv) {
 							break;
 						case '\t':
 						case ' ':
-							space = 1;
+							space = true;
 							break;
 						case '"':
 							if (!space) {
 								printerror("missing space between key and value strings");
 							}
-							quoted = 1;
+							quoted = true;
 							currentstate = VALUESTRING;
 							break;
 						case '/':
@@ -457,7 +458,7 @@ int main(int argc, char** argv) {
 							if (requirequotes) {
 								printerror("unexpected character after key string (possibly unquoted value string)");
 							} else {
-								quoted = 0;
+								quoted = false;
 								currentstate = VALUESTRING;
 							}
 							break;
@@ -467,12 +468,12 @@ int main(int argc, char** argv) {
 					//anything except a newline
 					if (stringindex == 0) {
 						string[0] = '\0';
-						overflow = 0;
+						overflow = false;
 					}
 					if (stringindex == MAX_STRING_LENGTH) {
 						printerror("value string size limit exceeded");
 						string[MAX_STRING_LENGTH - 1] = '\0';
-						overflow = 1;
+						overflow = true;
 					}
 					if (!overflow) {
 						string[stringindex] = character;
@@ -484,13 +485,13 @@ int main(int argc, char** argv) {
 									printerror("unescaped tab in value string");
 								}
 							} else {
-								space = 1;
+								space = true;
 								currentstate = VALUESTRINGEND;
 							}
 							break;
 						case ' ':
 							if (!quoted) {
-								space = 1;
+								space = true;
 								currentstate = VALUESTRINGEND;
 							}
 							break;
@@ -535,7 +536,7 @@ int main(int argc, char** argv) {
 				case VALUESTRINGEND:
 					//whitespace, newline, comment, or conditional
 					if (checkfile) {
-						checkfile = 0;
+						checkfile = false;
 #ifdef _WIN32
 						if (strlen(string) > MAX_PATH - strlen(basedir) - 1) { //Windows adds a slash, POSIX does not
 #else
