@@ -2,7 +2,7 @@
 kvlint is a small program designed to lint KeyValues files, such as those used in TF2 huds and as flat file storage for sourcemod plugins.
 
 ## usage
-    kvlint [-q] [-m] [-e] [-b] [-d] <filename> [...]
+    kvlint [-q] [-m] [-e] [-b] [-d] [-r] <filename> [...]
 - -q: require all keys and values to be quoted
 - -m: allow raw newlines in strings
 - -e: parse and validate escape sequences
