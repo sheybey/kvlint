@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
 	bool validatedirectives = false;
 	bool multipleroot = false;
 
-	while ((opt = getopt(argc, argv, "qmebdr")) != -1) {
+	while ((opt = getopt(argc, argv, "hqmebdr")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = true;
@@ -144,6 +144,7 @@ int main(int argc, char** argv) {
 			case 'r':
 				multipleroot = true;
 				break;
+			case 'h':
 			case '?':
 				//getopt prints an error message
 				die = true;
@@ -152,7 +153,8 @@ int main(int argc, char** argv) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s [-q] [-m] [-e] [-b] [-d] [-r] <filename> [...]\n", argv[0]);
+		printf("usage: %s -h | [-q] [-m] [-e] [-b] [-d] [-r] <filename> [...]\n", argv[0]);
+		printf("\t-h:\tshow usage message\n");
 		printf("\t-q:\trequire all keys and values to be quoted\n");
 		printf("\t-m:\tallow raw newlines in strings\n");
 		printf("\t-e:\tparse and validate escape sequences\n");
