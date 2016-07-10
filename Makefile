@@ -8,7 +8,7 @@ MKDIR=mkdir -p
 README=README.md LICENSE
 MSBUILD="/c/Program Files (x86)/MSBuild/14.0/Bin/MSBuild.exe"
 MSFLAGS=//t:Rebuild //p:Configuration=Release //p:Platform=x86
-PREFIX=/usr/local
+PREFIX=$(DESTDIR)/usr/local
 
 all: kvlint
 
