@@ -4,6 +4,7 @@ LDFLAGS=
 RM=rm -f
 MV=mv -f
 CP=cp
+INSTALL=install
 MKDIR=mkdir -p
 README=README.md LICENSE
 MSBUILD="/c/Program Files (x86)/MSBuild/14.0/Bin/MSBuild.exe"
@@ -37,10 +38,16 @@ tar: clean kvlint
 	tar czf kvlint-linux32.tar.gz kvlint $(README)
 
 install:
-	$(MKDIR) $(PREFIX)/share/doc/kvlint/
-	$(CP) $(README) $(PREFIX)/share/doc/kvlint/
-	$(CP) kvlint $(PREFIX)/bin/
+	$(INSTALL) -d $(PREFIX)/bin $(PREFIX)/share/doc/kvlint
+	$(INSTALL) ./kvlint $(PREFIX)/bin
+	$(INSTALL) -m644 $(README) $(PREFIX)/share/doc/kvlint
 
 uninstall:
 	$(RM) $(PREFIX)/bin/kvlint
 	$(RM) -r $(PREFIX)/share/doc/kvlint
+
+source:
+	$(MKDIR) kvlint-0.4
+	$(CP) kvlint.c $(README) Makefile kvlint-0.4/
+	tar czf kvlint-0.4.tar.gz kvlint-0.4
+	$(RM) -r kvlint-0.4
