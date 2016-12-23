@@ -1,6 +1,6 @@
 /*
  * kvlint.c - basic syntax check for KeyValues files
- * version 0.4
+ * version 0.5
  *
  * Copyright (c) 2015-2016 Sam Heybey
  *
@@ -132,11 +132,13 @@ int main(int argc, char** argv) {
 	bool requirequotes = false;
 	bool allowmultiline = false;
 	bool parseescapes = false;
+	bool ignoreshrug = false;
+	bool checkrootescapes = true;
 	bool blockcomments = false;
 	bool validatedirectives = false;
 	bool multipleroot = false;
 
-	while ((opt = getopt(argc, argv, "hqmebdr")) != -1) {
+	while ((opt = getopt(argc, argv, "hqmeswbdr")) != -1) {
 		switch (opt) {
 			case 'q':
 				requirequotes = true;
@@ -146,6 +148,12 @@ int main(int argc, char** argv) {
 				break;
 			case 'e':
 				parseescapes = true;
+				break;
+			case 's':
+				ignoreshrug = true;
+				break;
+			case 'w':
+				checkrootescapes = false;
 				break;
 			case 'b':
 				blockcomments = true;
@@ -165,11 +173,13 @@ int main(int argc, char** argv) {
 	}
 
 	if (die || optind >= argc) {
-		printf("usage: %s -h | [-q] [-m] [-e] [-b] [-d] [-r] <filename> [...]\n", argv[0]);
+		printf("usage: %s -h | [-q] [-m] [-e [-s] [-w]] [-b] [-d] [-r] <filename> [...]\n", argv[0]);
 		printf("\t-h:\tshow usage message\n");
 		printf("\t-q:\trequire all keys and values to be quoted\n");
 		printf("\t-m:\tallow raw newlines in strings\n");
 		printf("\t-e:\tparse and validate escape sequences\n");
+		printf("\t-s:\tignore shrug emote when validating escape sequences\n");
+		printf("\t-w:\tignore invalid escape sequences in the first root key string\n");
 		printf("\t-b:\tallow block comments\n");
 		printf("\t-d:\tvalidate #base directives\n");
 		printf("\t-r:\tallow multiple root keys\n");
@@ -184,6 +194,7 @@ int main(int argc, char** argv) {
 
 		int bracecount = 0;
 		int linecount = 1;
+		int lastbserror = -1;
 
 		int character;
 
@@ -235,7 +246,7 @@ int main(int argc, char** argv) {
 #else
 			abspath = realpath(argv[optind], NULL);
 			if (abspath == NULL) {
-				printf("unable to resolve full path, not validting directives\n");
+				printf("unable to resolve full path, not validating directives\n");
 				validatedirectives = false;
 				rcode = 1;
 			} else {
@@ -396,7 +407,7 @@ int main(int argc, char** argv) {
 							break;
 						case '"':
 							if (quoted) {
-								space = 0;
+								space = false;
 								currentstate = KEYSTRINGEND;
 							} else {
 								printerror("double-quote in unquoted key string");
@@ -591,7 +602,7 @@ int main(int argc, char** argv) {
 					}
 					break;
 				case STRINGESCAPE:
-					//backslash, t, n, quote
+					//backslash, t, n, quote, underscore
 					currentstate = prevstate;
 					switch (character) {
 						case '\\':
@@ -600,17 +611,27 @@ int main(int argc, char** argv) {
 						case '"':
 							//no state change
 							break;
+						case '_':
+							if (ignoreshrug) {
+								break;
+							}
+							//else intentional fallthrough
 						default:
-							switch (prevstate) {
-								case KEYSTRING:
-									printerror("invalid escape sequence in key string");
-									break;
-								case VALUESTRING:
-									printerror("invalid escape sequence in value string");
-									break;
-								default:
-									printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
-									break;
+							if (!(lastbserror == linecount)) {
+								lastbserror = linecount;
+								switch (prevstate) {
+									case KEYSTRING:
+										if (linecount != 1 || checkrootescapes) {
+											printerror("invalid escape sequence in key string");
+										}
+										break;
+									case VALUESTRING:
+										printerror("invalid escape sequence in value string");
+										break;
+									default:
+										printerror("you've found a bug in kvlint! please submit an issue on github with this error message and the file you're linting.");
+										break;
+								}
 							}
 							break;
 					}
